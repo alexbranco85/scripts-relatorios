@@ -21,22 +21,23 @@ from openpyxl import Workbook
 from twilio.rest import Client
 
 try:
-    from zoneinfo import ZoneInfo
+    from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 except ImportError:
     ZoneInfo = None
+    ZoneInfoNotFoundError = None
 
 # ==============================
 # CONFIGURAÇÕES - ALTERE AQUI 👇
 # ==============================
 
 # Período de datas que você quer puxar (formato YYYY-MM-DD)
-DATA_INICIO = "2025-11-12"
-DATA_FIM = "2025-11-12"
+DATA_INICIO = "2025-11-11"
+DATA_FIM = "2025-11-11"
 
 # Texto que deseja filtrar nas mensagens (case-insensitive).
 # Se não quiser filtro, deixe vazio: FILTRO = ""
 # Para usar regex, defina USAR_REGEX = True
-FILTRO = r"HIPERBET:Dia da Quarta Premiada!"
+FILTRO = r"NOVO SLOT DISPONIVEL!!! MYSTIC WISHES da Pragmatic"
 USAR_REGEX = True
 
 # Nome do arquivo XLSX de saída
@@ -53,7 +54,21 @@ DEFAULT_AUTH_TOKEN = ""
 # FIM DAS CONFIGURAÇÕES
 # ==============================
 
-FUSO_BRASIL = ZoneInfo("America/Sao_Paulo") if ZoneInfo else datetime.timezone(datetime.timedelta(hours=-3))
+def obter_fuso_brasil() -> datetime.tzinfo:
+    """
+    Retorna o fuso horário de São Paulo mesmo quando o tzdata não está disponível
+    (ex.: Windows sem pacote tzdata instalado). Garante fallback estável para UTC-03.
+    """
+    fallback = datetime.timezone(datetime.timedelta(hours=-3))
+    if not ZoneInfo:
+        return fallback
+    try:
+        return ZoneInfo("America/Sao_Paulo")
+    except (ZoneInfoNotFoundError, OSError, KeyError):
+        return fallback
+
+
+FUSO_BRASIL = obter_fuso_brasil()
 UTC = datetime.timezone.utc
 PRINT_LOCK = threading.Lock()
 CLIENT_CACHE = threading.local()
