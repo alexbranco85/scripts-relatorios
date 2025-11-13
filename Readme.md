@@ -14,6 +14,16 @@ python -m pip install -r requirements.txt pyinstaller
 set TWILIO_ACCOUNT_SID=...
 set TWILIO_AUTH_TOKEN=...
 ```
+
+Se você for abrir o `.exe` com duplo clique (sem um terminal), crie um arquivo `.env`
+no mesmo diretório contendo:
+
+```
+TWILIO_ACCOUNT_SID=seu_sid
+TWILIO_AUTH_TOKEN=seu_token
+```
+
+O script detecta automaticamente esse arquivo (ou `twilio.env`) e carrega as credenciais.
 Ou edite os padrões diretamente no script.
 
 **Gerar o executável GUI:**

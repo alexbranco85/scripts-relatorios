@@ -11,6 +11,7 @@ Requisitos opcionais:
 import datetime
 import os
 import re
+import sys
 import threading
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from contextlib import contextmanager
@@ -49,6 +50,64 @@ NUM_WORKERS = 300
 # Credenciais padrão do Twilio (podem ser sobrescritas via env ou parâmetros)
 DEFAULT_ACCOUNT_SID = ""
 DEFAULT_AUTH_TOKEN = ""
+
+ENV_CREDENTIAL_KEYS = ("TWILIO_ACCOUNT_SID", "TWILIO_AUTH_TOKEN")
+
+
+def _tem_credenciais_configuradas() -> bool:
+    return all(os.getenv(chave) for chave in ENV_CREDENTIAL_KEYS)
+
+
+def carregar_credenciais_twilio():
+    """
+    Preenche as variáveis de ambiente do Twilio lendo arquivos .env próximos ao script
+    (ou ao executável empacotado). Ajuda quando o usuário executa o .exe com duplo clique.
+    """
+    if _tem_credenciais_configuradas():
+        return
+
+    candidatos: List[Path] = []
+    if getattr(sys, "frozen", False):
+        candidatos.append(Path(sys.executable).resolve().parent)
+
+    try:
+        script_dir = Path(__file__).resolve().parent
+        candidatos.append(script_dir)
+    except NameError:
+        pass
+
+    candidatos.append(Path.cwd())
+
+    arquivos = [".env", "twilio.env", "twilio_credentials.env"]
+    visitados = set()
+
+    for base in candidatos:
+        for nome in arquivos:
+            caminho = (base / nome).resolve()
+            if caminho in visitados or not caminho.is_file():
+                continue
+            visitados.add(caminho)
+
+            try:
+                linhas = caminho.read_text(encoding="utf-8").splitlines()
+            except OSError:
+                continue
+
+            for linha in linhas:
+                conteudo = linha.strip()
+                if not conteudo or conteudo.startswith("#") or "=" not in conteudo:
+                    continue
+                chave, valor = conteudo.split("=", 1)
+                chave = chave.replace("export", "", 1).strip()
+                valor = valor.strip().strip('"').strip("'")
+                if chave in ENV_CREDENTIAL_KEYS and not os.getenv(chave):
+                    os.environ[chave] = valor
+
+            if _tem_credenciais_configuradas():
+                return
+
+
+carregar_credenciais_twilio()
 
 # ==============================
 # FIM DAS CONFIGURAÇÕES
