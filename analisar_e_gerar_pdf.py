@@ -83,9 +83,57 @@ DATA_RELATORIO = datetime.now().strftime("%d/%m/%Y")
 ARQUIVO_PDF_SAIDA = f"relatorio_apostatudo_{datetime.now().strftime('%d%m%Y')}.pdf"
 SUBTITLE = "FLOW ID " + ID_FLOW
 
+MESSAGE_FIELDS = (
+    "body",
+    "message",
+    "mensagem",
+    "texto",
+    "copy",
+    "msg",
+    "content",
+    "message_body",
+)
+
 # ==============================
 # FIM DAS CONFIGURAÇÕES
 # ==============================
+
+def _normalizar_texto_sms(valor: Optional[str]) -> Optional[str]:
+    if valor is None:
+        return None
+    texto = str(valor).strip()
+    return texto or None
+
+
+def _extrair_copy_de_registro(registro: dict) -> Optional[str]:
+    for campo in MESSAGE_FIELDS:
+        if campo in registro:
+            texto = _normalizar_texto_sms(registro.get(campo))
+            if texto:
+                return texto
+    return None
+
+
+def _resolver_texto_sms(texto_preferencial: Optional[str], filtro: Optional[str], resultados_por_arquivo):
+    # Preferência explícita (campo vindo da GUI/CLI)
+    texto = _normalizar_texto_sms(texto_preferencial)
+    if texto:
+        return texto
+
+    # Em seguida, reutiliza o filtro informado
+    texto = _normalizar_texto_sms(filtro)
+    if texto:
+        return texto
+
+    # Por fim, pega o primeiro texto de mensagem encontrado nos dados filtrados
+    for resultado in resultados_por_arquivo:
+        registros = resultado.get("registros_filtrados") or []
+        for registro in registros:
+            texto_registro = _extrair_copy_de_registro(registro)
+            if texto_registro:
+                return texto_registro
+    return None
+
 
 def extrair_chave_telefone(registro):
     """Extrai uma chave de telefone normalizada para deduplicação."""
@@ -1230,8 +1278,6 @@ def gerar_pdf_relatorio(
             USAR_REGEX = usar_regex
         if id_flow is not None:
             ID_FLOW = id_flow
-        if texto_sms is not None:
-            TEXTO_SMS = texto_sms
         if arquivo_pdf_saida is not None:
             ARQUIVO_PDF_SAIDA = arquivo_pdf_saida
         if subtitle is not None:
@@ -1243,6 +1289,10 @@ def gerar_pdf_relatorio(
 
         if not dados_consolidados["status_counter"]:
             raise ValueError("Nenhum dado encontrado com o filtro especificado. PDF não será gerado.")
+
+        texto_dinamico = _resolver_texto_sms(texto_sms, FILTRO, resultados_por_arquivo)
+        if texto_dinamico:
+            TEXTO_SMS = texto_dinamico
 
         gerar_relatorio_multiplo_pdf(dados_consolidados, resultados_por_arquivo)
         return Path(ARQUIVO_PDF_SAIDA).expanduser().resolve()

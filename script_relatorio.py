@@ -38,7 +38,7 @@ DATA_FIM = "2025-11-11"
 # Texto que deseja filtrar nas mensagens (case-insensitive).
 # Se não quiser filtro, deixe vazio: FILTRO = ""
 # Para usar regex, defina USAR_REGEX = True
-FILTRO = r"NOVO SLOT DISPONIVEL!!! MYSTIC WISHES da Pragmatic"
+FILTRO = r""
 USAR_REGEX = True
 
 # Nome do arquivo XLSX de saída

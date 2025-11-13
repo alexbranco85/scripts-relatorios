@@ -329,6 +329,7 @@ class RelatorioApp(tk.Tk):
                     filtro=filtro,
                     usar_regex=usar_regex,
                     arquivo_pdf_saida=str(saida),
+                    texto_sms=filtro or None,
                 )
             self._propagar_buffer(buffer)
             self._log(f"✅ PDF gerado: {pdf_path}", level="success")
