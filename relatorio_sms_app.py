@@ -27,7 +27,7 @@ import script_relatorio
 class RelatorioApp(tk.Tk):
     def __init__(self):
         super().__init__()
-        self.title("Relatório SMS - ApostaTudo")
+        self.title("Relatório SMS")
         self.geometry("960x720")
         self.minsize(820, 640)
 
