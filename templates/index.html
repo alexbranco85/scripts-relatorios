@@ -1,0 +1,96 @@
+{% extends "base.html" %}
+{% block content %}
+  <section class="card">
+    <h2>1. Baixar dados do Twilio (gera XLSX)</h2>
+    <p>Informe o intervalo de datas e, se quiser, um filtro de texto ou regex para reduzir o resultado.</p>
+    <form
+      method="post"
+      action="{{ url_for('gerar_planilha') }}"
+      class="form-grid"
+      data-loading-target="#planilha-status"
+      data-loading-text="Gerando planilha, aguarde..."
+      data-async="planilha"
+      data-result-target="#planilha-resultado"
+      data-log-target="#planilha-log"
+    >
+      <label>
+        Data início
+        <input type="date" name="start_date" value="{{ start_date }}" required />
+      </label>
+      <label>
+        Data fim
+        <input type="date" name="end_date" value="{{ end_date }}" required />
+      </label>
+      <label class="full">
+        Filtro de texto ou regex
+        <input type="text" name="sms_filter" value="{{ sms_filter }}" placeholder="Ex.: cashback" />
+      </label>
+      <label class="checkbox">
+        <input type="checkbox" name="sms_regex" {% if sms_regex %}checked{% endif %} />
+        Usar regex
+      </label>
+      <label class="full">
+        Nome do arquivo XLSX
+        <input type="text" name="xlsx_filename" value="{{ xlsx_filename }}" />
+      </label>
+      <div class="actions full">
+        <button type="submit" class="btn primary">Gerar planilha</button>
+      </div>
+      <div class="full log-panel">
+        <div id="planilha-status" class="status-line" aria-live="polite"></div>
+        <pre id="planilha-log" class="log-output" aria-live="polite">Os logs aparecerão aqui assim que o processamento iniciar.</pre>
+      </div>
+      <div id="planilha-resultado" class="result-message" aria-live="polite"></div>
+    </form>
+  </section>
+
+  <section class="card">
+    <h2>2. Gerar PDF consolidado</h2>
+    <p>Envie uma ou mais planilhas/CSV/JSON geradas anteriormente e aplique o filtro desejado.</p>
+    <form
+      method="post"
+      action="{{ url_for('gerar_pdf') }}"
+      enctype="multipart/form-data"
+      class="form-grid"
+      data-loading-target="#pdf-status"
+      data-loading-text="Gerando PDF consolidado..."
+      data-async="pdf"
+      data-result-target="#pdf-resultado"
+      data-log-target="#pdf-log"
+      data-download-label="Baixar PDF"
+    >
+      <label class="full">
+        Arquivos de entrada
+        <input type="file" name="arquivos" accept=".xlsx,.xlsm,.csv,.json,.jsonl" multiple required />
+      </label>
+      <label class="full">
+        Filtro de texto ou regex (PDF)
+        <input type="text" name="pdf_filter" value="{{ pdf_filter }}" placeholder="Mesmo padrão usado na planilha" />
+      </label>
+      <label class="checkbox">
+        <input type="checkbox" name="pdf_regex" {% if pdf_regex %}checked{% endif %} />
+        Usar regex
+      </label>
+      <label class="full">
+        Texto preferencial para exibir no PDF
+        <textarea name="pdf_texto_sms" rows="3" placeholder="Opcional">{{ pdf_texto_sms }}</textarea>
+      </label>
+      <label class="full">
+        Subtítulo (ex.: FLOW ID)
+        <input type="text" name="pdf_subtitle" value="{{ pdf_subtitle }}" placeholder="Opcional" />
+      </label>
+      <label class="full">
+        Nome do PDF
+        <input type="text" name="pdf_filename" value="{{ pdf_filename }}" />
+      </label>
+      <div class="actions full">
+        <button type="submit" class="btn secondary">Gerar PDF</button>
+      </div>
+      <div class="full log-panel">
+        <div id="pdf-status" class="status-line" aria-live="polite"></div>
+        <pre id="pdf-log" class="log-output" aria-live="polite">Os logs aparecerão aqui assim que o processamento iniciar.</pre>
+      </div>
+      <div id="pdf-resultado" class="result-message" aria-live="polite"></div>
+    </form>
+  </section>
+{% endblock %}

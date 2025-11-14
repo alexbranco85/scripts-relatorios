@@ -23,4 +23,4 @@ htmlcov/
 .venv
 **/.venv/
 **/.venv
-
+.env

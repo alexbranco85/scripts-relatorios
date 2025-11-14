@@ -71,17 +71,17 @@ ARQUIVOS = ["relatorio-hiper.xlsx"]
 # Se não quiser filtro, deixe vazio: FILTRO = ""
 # Para usar regex, defina USAR_REGEX = True
 # Filtro que captura o texto alvo permitindo variação no final da URL
-FILTRO = r"Sistema de CASHBACK Diario ate 20% confira agora:"
+FILTRO = r""
 USAR_REGEX = True
 
 # Informações do relatório
-ID_FLOW = "7921405a-df73-45b1-ba81-0528bbae42e8"
+ID_FLOW = ""
 TEXTO_SMS = (
-    "[ APOSTATUDO.BET.BR ] Sistema de CASHBACK Diario ate 20% confira agora: http://sms.apostatudo.bet.br/MCeQs1"
+    ""
 )
 DATA_RELATORIO = datetime.now().strftime("%d/%m/%Y")
 ARQUIVO_PDF_SAIDA = f"relatorio_apostatudo_{datetime.now().strftime('%d%m%Y')}.pdf"
-SUBTITLE = "FLOW ID " + ID_FLOW
+SUBTITLE = "" + ID_FLOW
 
 MESSAGE_FIELDS = (
     "body",

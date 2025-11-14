@@ -9,6 +9,7 @@ Requisitos opcionais:
 
 #!/usr/bin/env python3
 import datetime
+import math
 import os
 import re
 import sys
@@ -45,7 +46,13 @@ USAR_REGEX = True
 ARQUIVO_SAIDA = "relatorio-hiper.xlsx"
 
 # Quantidade de blocos/threads simultâneas para as requisições
-NUM_WORKERS = 300
+# Mantemos um teto seguro para não estourar limites do Twilio.
+NUM_WORKERS = 50
+MAX_CONCURRENT_REQUESTS = 50
+
+# Duração mínima (em minutos) de cada janela de coleta.
+# Se o período for curto, o script divide em múltiplas janelas menores para paralelizar mais.
+MINUTOS_JANELA = 1
 
 # Credenciais padrão do Twilio (podem ser sobrescritas via env ou parâmetros)
 DEFAULT_ACCOUNT_SID = ""
@@ -176,17 +183,36 @@ def formatar_brasil(dt):
 
 def dividir_periodo(
     data_inicio: datetime.date, data_fim: datetime.date, max_blocos: int
-) -> List[Tuple[datetime.date, datetime.date]]:
-    dias_totais = (data_fim - data_inicio).days + 1
-    blocos = max(1, min(max_blocos, dias_totais))
-    tamanho_bloco = max(1, (dias_totais + blocos - 1) // blocos)
+) -> List[Tuple[datetime.datetime, datetime.datetime]]:
+    """Divide o intervalo em janelas menores (até sub-horárias) para paralelizar melhor."""
 
-    intervalos = []
-    inicio = data_inicio
-    while inicio <= data_fim:
-        fim = min(inicio + datetime.timedelta(days=tamanho_bloco - 1), data_fim)
-        intervalos.append((inicio, fim))
-        inicio = fim + datetime.timedelta(days=1)
+    if data_fim < data_inicio:
+        return []
+
+    inicio_brt = datetime.datetime.combine(data_inicio, datetime.time.min, tzinfo=FUSO_BRASIL)
+    fim_brt = datetime.datetime.combine(data_fim + datetime.timedelta(days=1), datetime.time.min, tzinfo=FUSO_BRASIL)
+    total_segundos = max(int((fim_brt - inicio_brt).total_seconds()), 1)
+
+    max_blocos = max(1, max_blocos)
+    max_intervalos_permitidos = max(1, total_segundos // max(1, MINUTOS_JANELA * 60))
+    blocos = max(1, min(max_blocos, max_intervalos_permitidos))
+    tamanho_segundos = max(1, math.ceil(total_segundos / blocos))
+
+    intervalos: List[Tuple[datetime.datetime, datetime.datetime]] = []
+    for indice in range(blocos):
+        inicio_atual = inicio_brt + datetime.timedelta(seconds=indice * tamanho_segundos)
+        if inicio_atual >= fim_brt:
+            break
+        fim_atual = min(inicio_brt + datetime.timedelta(seconds=(indice + 1) * tamanho_segundos), fim_brt)
+        intervalos.append((inicio_atual, fim_atual))
+
+    if not intervalos:
+        intervalos.append((inicio_brt, fim_brt))
+    else:
+        # Garante que a última janela termine exatamente no fim desejado.
+        inicio_ultimo, _ = intervalos[-1]
+        intervalos[-1] = (inicio_ultimo, fim_brt)
+
     return intervalos
 
 
@@ -230,23 +256,26 @@ def preparar_filtro(filtro: str, usar_regex: bool) -> Optional[FiltroFunc]:
 
 def processar_bloco(
     indice_bloco: int,
-    data_inicio: datetime.date,
-    data_fim: datetime.date,
+    inicio_intervalo: datetime.datetime,
+    fim_intervalo: datetime.datetime,
     filtro_func: Optional[FiltroFunc],
     acc_sid: str,
     auth_tok: str,
- ) -> Dict[str, object]:
-    inicio_brt = datetime.datetime.combine(data_inicio, datetime.time.min, tzinfo=FUSO_BRASIL)
-    fim_brt = datetime.datetime.combine(data_fim + datetime.timedelta(days=1), datetime.time.min, tzinfo=FUSO_BRASIL)
-    inicio_utc = inicio_brt.astimezone(UTC)
-    fim_utc = fim_brt.astimezone(UTC)
+) -> Dict[str, object]:
+    inicio_brt = inicio_intervalo.astimezone(FUSO_BRASIL)
+    fim_brt = fim_intervalo.astimezone(FUSO_BRASIL)
+    inicio_utc = inicio_intervalo.astimezone(UTC)
+    fim_utc = fim_intervalo.astimezone(UTC)
 
     cliente = get_twilio_client(acc_sid, auth_tok)
 
     processadas = 0
     registros = []
 
-    log(f"[Bloco {indice_bloco}] Iniciando busca ({data_inicio.isoformat()}→{data_fim.isoformat()})…")
+    log(
+        f"[Bloco {indice_bloco}] Iniciando busca "
+        f"({inicio_brt.strftime('%Y-%m-%d %H:%M')}→{fim_brt.strftime('%Y-%m-%d %H:%M')})…"
+    )
 
     for msg in cliente.messages.stream(
         date_sent_after=inicio_utc,
@@ -299,7 +328,7 @@ def processar_bloco(
 
     log(
         f"[Bloco {indice_bloco}] Finalizado | processadas={processadas} | encontradas={len(registros)} "
-        f"| intervalo={data_inicio.isoformat()}→{data_fim.isoformat()}"
+        f"| intervalo={inicio_brt.strftime('%Y-%m-%d %H:%M')}→{fim_brt.strftime('%Y-%m-%d %H:%M')}"
     )
 
     return {
@@ -388,7 +417,13 @@ def gerar_relatorio_twilio(
         intervalos = dividir_periodo(data_inicio_dt, data_fim_dt, num_workers)
         log(f"🧵 Dividindo intervalo em {len(intervalos)} bloco(s) para requisições paralelas...")
         for idx, (inicio_bloco, fim_bloco) in enumerate(intervalos, start=1):
-            log(f"   • Bloco {idx}: {inicio_bloco.isoformat()} → {fim_bloco.isoformat()}")
+            log(
+                "   • Bloco {idx}: {ini} → {fim}".format(
+                    idx=idx,
+                    ini=inicio_bloco.astimezone(FUSO_BRASIL).strftime("%Y-%m-%d %H:%M"),
+                    fim=fim_bloco.astimezone(FUSO_BRASIL).strftime("%Y-%m-%d %H:%M"),
+                )
+            )
 
         if filtro_func:
             modo = "regex" if usar_regex else "texto simples"
@@ -399,8 +434,8 @@ def gerar_relatorio_twilio(
 
         resultados = []
 
-        max_workers = min(len(intervalos), num_workers) or 1
-        with ThreadPoolExecutor(max_workers=max_workers) as executor:
+        limite_concorrencia = max(1, min(len(intervalos), num_workers, MAX_CONCURRENT_REQUESTS))
+        with ThreadPoolExecutor(max_workers=limite_concorrencia) as executor:
             tarefas = [
                 executor.submit(
                     processar_bloco,

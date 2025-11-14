@@ -43,10 +43,30 @@ O binário será criado em `dist\RelatorioSMS.exe`. Copie junto eventuais arquiv
 
 ---
 
+## Painel web (Flask)
+
+Também há uma versão web com os mesmos fluxos do executável. Para iniciar:
+
+1. Configure as credenciais em variáveis de ambiente (`TWILIO_ACCOUNT_SID` e `TWILIO_AUTH_TOKEN`) ou mantenha um `.env` ao lado do script, exatamente como na GUI.
+2. Instale as dependências (`python -m pip install -r requirements.txt`).
+3. Execute `flask --app relatorio_sms_web run --reload` (ou `python relatorio_sms_web.py` para o servidor simples de desenvolvimento).
+4. Abra `http://127.0.0.1:5000` no navegador.
+
+Funcionalidades:
+
+- Formulário para baixar o XLSX diretamente do Twilio, com datas, filtro e escolha do nome do arquivo.
+- Formulário para gerar o PDF consolidado enviando planilhas/CSV/JSON (múltiplos uploads em uma única submissão).
+- Os arquivos processados ficam em diretórios temporários e são limpos assim que o download é acionado.
+- Os logs aparecem na própria página de resultado junto do botão para baixar o arquivo.
+
+Para ambientes multiusuário considere definir uma chave própria (`RELATORIO_SMS_WEB_SECRET`) e servir o Flask por trás de um servidor real (Gunicorn, nginx, etc.).
+
+---
+
 ## Verificação
 
 ```sh
-python3 -m py_compile script_relatorio.py analisar_e_gerar_pdf.py relatorio_sms_app.py
+python3 -m py_compile script_relatorio.py analisar_e_gerar_pdf.py relatorio_sms_app.py relatorio_sms_web.py
 ```
 
 ---

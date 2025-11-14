@@ -1,0 +1,204 @@
+<!doctype html>
+<html lang="pt-BR">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Relatório SMS - Web</title>
+    <link rel="stylesheet" href="{{ url_for('static', filename='styles.css') }}" />
+  </head>
+  <body>
+    <header class="topbar">
+      <h1>Relatório SMS - Painel Web</h1>
+    </header>
+    <main class="container">
+      {% with messages = get_flashed_messages(with_categories=true) %}
+        {% if messages %}
+          <div class="flash-container">
+            {% for category, message in messages %}
+              <div class="flash flash-{{ category }}">{{ message }}</div>
+            {% endfor %}
+          </div>
+        {% endif %}
+      {% endwith %}
+      {% block content %}{% endblock %}
+    </main>
+    <footer class="footer">
+      <small>Defina TWILIO_ACCOUNT_SID/TWILIO_AUTH_TOKEN via ambiente ou .env ao lado do script.</small>
+    </footer>
+    <script>
+      document.addEventListener("DOMContentLoaded", () => {
+        const STATUS_ENDPOINTS = {
+          planilha: (id) => `/api/planilha/${id}?_=${Date.now()}`,
+          pdf: (id) => `/api/pdf/${id}?_=${Date.now()}`,
+        };
+
+        const setLoadingState = (form, target, message, logBox) => {
+          const texto = message || form.dataset.loadingText || "Processando...";
+          if (target) {
+            target.textContent = texto;
+            target.classList.add("visible");
+          }
+          if (logBox && !logBox.textContent.trim()) {
+            logBox.textContent = texto;
+          }
+          form.querySelectorAll("button[type=submit]").forEach((btn) => {
+            if (!btn.dataset.originalText) {
+              btn.dataset.originalText = btn.textContent;
+            }
+            btn.textContent = texto;
+            btn.disabled = true;
+          });
+        };
+
+        const resetLoadingState = (form, target) => {
+          if (target) {
+            target.classList.remove("visible");
+            target.textContent = "";
+          }
+          form.querySelectorAll("button[type=submit]").forEach((btn) => {
+            if (btn.dataset.originalText) {
+              btn.textContent = btn.dataset.originalText;
+              delete btn.dataset.originalText;
+            }
+            btn.disabled = false;
+          });
+        };
+
+        const atualizarResultado = (elemento, mensagem, downloadUrl, rotulo, erro = false) => {
+          if (!elemento) {
+            return;
+          }
+          if (erro) {
+            elemento.innerHTML = `<p class="error-message">${mensagem}</p>`;
+            return;
+          }
+          const link = downloadUrl ? `<a class="btn primary" href="${downloadUrl}" download>${rotulo}</a>` : "";
+          elemento.innerHTML = `<p>${mensagem || "Processo finalizado."}</p>${link}`;
+        };
+
+        const acompanharJob = (tipo, jobId, form, target, resultBox, logBox, rotuloDownload) => {
+          const atualizar = async () => {
+            try {
+              const endpointFn = STATUS_ENDPOINTS[tipo];
+              const url = endpointFn ? endpointFn(jobId) : `/api/${tipo}/${jobId}?_=${Date.now()}`;
+              const resposta = await fetch(url);
+              if (!resposta.ok) {
+                throw new Error("Não foi possível consultar o progresso.");
+              }
+              let dados;
+              try {
+                dados = await resposta.json();
+              } catch (erro) {
+                throw new Error("Falha ao interpretar o retorno do servidor.");
+              }
+
+              if (logBox) {
+                const linhas = Array.isArray(dados.logs) && dados.logs.length
+                  ? dados.logs.join("\n")
+                  : "Aguardando logs...";
+                logBox.textContent = linhas;
+                logBox.scrollTop = logBox.scrollHeight;
+              }
+
+              if (target) {
+                if (tipo === "planilha") {
+                  const count = dados.encontradas || 0;
+                  // target.textContent = `Processadas: ${count} mensagem${count === 1 ? "" : "s"}`;
+                } else {
+                  target.textContent = dados.mensagem || "Processando PDF...";
+                }
+              }
+
+              if (dados.status === "done") {
+                resetLoadingState(form, target);
+                atualizarResultado(resultBox, dados.mensagem || "Processo finalizado.", dados.download_url, rotuloDownload);
+                return;
+              }
+
+              if (dados.status === "error") {
+                resetLoadingState(form, target);
+                if (logBox) {
+                  logBox.textContent = dados.erro || "Erro ao processar.";
+                }
+                atualizarResultado(resultBox, dados.erro || "Erro ao processar.", null, rotuloDownload, true);
+                return;
+              }
+            } catch (erro) {
+              resetLoadingState(form, target);
+              if (logBox) {
+                logBox.textContent = erro.message;
+              }
+              atualizarResultado(resultBox, erro.message, null, rotuloDownload, true);
+              return;
+            }
+
+            setTimeout(atualizar, 1500);
+          };
+
+          atualizar();
+        };
+
+        const iniciarJobAssincrono = async (form, target) => {
+          const tipo = form.dataset.async;
+          const resultBox = form.dataset.resultTarget ? document.querySelector(form.dataset.resultTarget) : null;
+          const logBox = form.dataset.logTarget ? document.querySelector(form.dataset.logTarget) : null;
+          const rotuloDownload = form.dataset.downloadLabel || (tipo === "pdf" ? "Baixar PDF" : "Baixar XLSX");
+
+          if (resultBox) {
+            resultBox.innerHTML = "";
+          }
+          if (logBox) {
+            logBox.textContent = "Iniciando processamento...";
+          }
+
+          setLoadingState(form, target, form.dataset.loadingText || "Processando...", logBox);
+          try {
+            const resposta = await fetch(form.action, {
+              method: form.method || "post",
+              body: new FormData(form),
+              headers: {
+                "X-Requested-With": "XMLHttpRequest",
+              },
+            });
+            let dados = {};
+            try {
+              dados = await resposta.json();
+            } catch (erro) {
+              if (!resposta.ok) {
+                throw new Error("Não foi possível iniciar o processo.");
+              }
+            }
+            if (!resposta.ok) {
+              throw new Error(dados.error || "Não foi possível iniciar o processo.");
+            }
+            acompanharJob(tipo, dados.job_id, form, target, resultBox, logBox, rotuloDownload);
+          } catch (erro) {
+            resetLoadingState(form, target);
+            if (logBox) {
+              logBox.textContent = erro.message;
+            }
+            if (resultBox) {
+              resultBox.innerHTML = `<p class="error-message">${erro.message}</p>`;
+            } else if (target) {
+              target.textContent = erro.message;
+              target.classList.add("visible");
+            }
+          }
+        };
+
+        document.querySelectorAll("form[data-loading-target]").forEach((form) => {
+          form.addEventListener("submit", (event) => {
+            const selector = form.dataset.loadingTarget;
+            const target = selector ? document.querySelector(selector) : null;
+            if (form.dataset.async) {
+              event.preventDefault();
+              iniciarJobAssincrono(form, target);
+              return;
+            }
+            setLoadingState(form, target, form.dataset.loadingText || "Processando...", null);
+          });
+        });
+      });
+    </script>
+  </body>
+</html>
