@@ -47,8 +47,8 @@ ARQUIVO_SAIDA = "relatorio-hiper.xlsx"
 
 # Quantidade de blocos/threads simultâneas para as requisições
 # Mantemos um teto seguro para não estourar limites do Twilio.
-NUM_WORKERS = 10
-MAX_CONCURRENT_REQUESTS = 10
+NUM_WORKERS = 1
+MAX_CONCURRENT_REQUESTS = 1
 
 # Duração mínima (em minutos) de cada janela de coleta.
 # Se o período for curto, o script divide em múltiplas janelas menores para paralelizar mais.
