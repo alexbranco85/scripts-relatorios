@@ -183,13 +183,14 @@ def _registrar_log_job(job_id: str, mensagem: str):
             if len(logs) > MAX_LOG_ITEMS:
                 logs = logs[-MAX_LOG_ITEMS:]
             job["logs"] = logs
+            valor_atual = int(job.get("encontradas") or 0)
             valor: Optional[int] = None
             if match:
                 valor = int(match.group(1))
             elif "Encontrada" in mensagem:
-                valor = int(job.get("encontradas", 0)) + 1
+                valor = valor_atual + 1
             if valor is not None:
-                job["encontradas"] = max(int(job.get("encontradas", 0)), valor)
+                job["encontradas"] = max(valor_atual, valor)
 
         _update_job("planilha", job_id, _aplicar)
 
@@ -222,15 +223,19 @@ def _iniciar_job_planilha(
 ):
     job_id = secrets.token_urlsafe(12)
     with PLANILHA_LOCK:
-        PLANILHA_JOBS[job_id] = {
-            "status": "running",
-            "logs": [],
-            "encontradas": 0,
-            "processados": 0,
-            "mensagem": "",
-            "download_token": None,
-            "erro": None,
-        }
+        _save_job(
+            "planilha",
+            job_id,
+            {
+                "status": "running",
+                "logs": [],
+                "encontradas": 0,
+                "processados": 0,
+                "mensagem": "",
+                "download_token": None,
+                "erro": None,
+            },
+        )
 
     thread = threading.Thread(
         target=_worker_job_planilha,
@@ -288,32 +293,33 @@ def _worker_job_planilha(
 
 def _registrar_log_pdf(job_id: str, mensagem: str):
     with PDF_LOCK:
-        job = PDF_JOBS.get(job_id)
-        if not job:
-            return
-        logs = job.setdefault("logs", [])
-        logs.append(mensagem)
-        if len(logs) > MAX_LOG_ITEMS:
-            job["logs"] = logs[-MAX_LOG_ITEMS:]
+        def _aplicar(job: Dict[str, object]):
+            logs = list(job.get("logs", []))
+            logs.append(mensagem)
+            if len(logs) > MAX_LOG_ITEMS:
+                logs = logs[-MAX_LOG_ITEMS:]
+            job["logs"] = logs
+
+        _update_job("pdf", job_id, _aplicar)
 
 
 def _atualizar_job_pdf(job_id: str, **campos):
     with PDF_LOCK:
-        job = PDF_JOBS.get(job_id)
-        if not job:
-            return
-        job.update(campos)
+        def _aplicar(job: Dict[str, object]):
+            job.update(campos)
+
+        _update_job("pdf", job_id, _aplicar)
 
 
 def _obter_job_pdf(job_id: str) -> Optional[Dict[str, object]]:
     with PDF_LOCK:
-        job = PDF_JOBS.get(job_id)
-        if not job:
-            return None
-        copia = job.copy()
-        if "logs" in copia:
-            copia["logs"] = list(copia["logs"])
-        return copia
+        job = _load_job("pdf", job_id)
+    if not job:
+        return None
+    copia = job.copy()
+    if "logs" in copia:
+        copia["logs"] = list(copia["logs"])
+    return copia
 
 
 def _iniciar_job_pdf(
@@ -328,13 +334,17 @@ def _iniciar_job_pdf(
 ):
     job_id = secrets.token_urlsafe(12)
     with PDF_LOCK:
-        PDF_JOBS[job_id] = {
-            "status": "running",
-            "logs": [],
-            "mensagem": "",
-            "erro": None,
-            "download_token": None,
-        }
+        _save_job(
+            "pdf",
+            job_id,
+            {
+                "status": "running",
+                "logs": [],
+                "mensagem": "",
+                "erro": None,
+                "download_token": None,
+            },
+        )
 
     thread = threading.Thread(
         target=_worker_job_pdf,
