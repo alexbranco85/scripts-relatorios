@@ -4,6 +4,7 @@
 from __future__ import annotations
 
 import io
+import json
 import os
 import secrets
 import shutil
@@ -35,11 +36,16 @@ import script_relatorio
 app = Flask(__name__)
 app.secret_key = os.getenv("RELATORIO_SMS_WEB_SECRET", "relatorio-sms-web")
 
-DOWNLOAD_CACHE: Dict[str, Dict[str, object]] = {}
+STATE_DIR = Path(
+    os.getenv(
+        "RELATORIO_SMS_STATE_DIR",
+        Path(tempfile.gettempdir()) / "relatorio_sms_web_state",
+    )
+)
+STATE_DIR.mkdir(parents=True, exist_ok=True)
+
 CACHE_LOCK = threading.Lock()
-PLANILHA_JOBS: Dict[str, Dict[str, object]] = {}
 PLANILHA_LOCK = threading.Lock()
-PDF_JOBS: Dict[str, Dict[str, object]] = {}
 PDF_LOCK = threading.Lock()
 PROGRESS_REGEX = re.compile(r"Encontrada #?(\d+)")
 MAX_LOG_ITEMS = 200
@@ -82,58 +88,129 @@ def _sanitize_filename(nome: str, extensao_padrao: str) -> str:
     return nome_limpo
 
 
+def _state_path(prefixo: str, identificador: str) -> Path:
+    seguro = re.sub(r"[^A-Za-z0-9_.-]", "_", identificador)
+    return STATE_DIR / f"{prefixo}_{seguro}.json"
+
+
+def _write_state(path: Path, data: Dict[str, object]):
+    temp_path = path.with_name(f"{path.name}.tmp")
+    path.parent.mkdir(parents=True, exist_ok=True)
+    temp_path.write_text(json.dumps(data, ensure_ascii=False), encoding="utf-8")
+    temp_path.replace(path)
+
+
+def _read_state(path: Path) -> Optional[Dict[str, object]]:
+    try:
+        payload = path.read_text(encoding="utf-8")
+    except FileNotFoundError:
+        return None
+    payload = payload.strip()
+    if not payload:
+        return None
+    try:
+        return json.loads(payload)
+    except json.JSONDecodeError:
+        return None
+
+
+def _delete_state(path: Path):
+    try:
+        path.unlink()
+    except FileNotFoundError:
+        pass
+
+
+def _job_state_path(tipo: str, job_id: str) -> Path:
+    return _state_path(f"{tipo}_job", job_id)
+
+
+def _load_job(tipo: str, job_id: str) -> Optional[Dict[str, object]]:
+    return _read_state(_job_state_path(tipo, job_id))
+
+
+def _save_job(tipo: str, job_id: str, dados: Dict[str, object]):
+    _write_state(_job_state_path(tipo, job_id), dados)
+
+
+def _update_job(tipo: str, job_id: str, atualizador: Callable[[Dict[str, object]], None]):
+    dados = _load_job(tipo, job_id)
+    if not dados:
+        return None
+    atualizador(dados)
+    _save_job(tipo, job_id, dados)
+    return dados
+
+
 def _registrar_download(arquivo: Path, download_name: str, cleanup_dir: Optional[Path]) -> str:
     token = secrets.token_urlsafe(16)
+    registro = {
+        "path": str(arquivo),
+        "name": download_name,
+        "cleanup": str(cleanup_dir) if cleanup_dir else None,
+    }
     with CACHE_LOCK:
-        DOWNLOAD_CACHE[token] = {
-            "path": arquivo,
-            "name": download_name,
-            "cleanup": cleanup_dir,
-        }
+        _write_state(_state_path("download", token), registro)
     return token
 
 
 def _resgatar_download(token: str) -> Optional[Dict[str, object]]:
+    caminho_estado = _state_path("download", token)
     with CACHE_LOCK:
-        return DOWNLOAD_CACHE.pop(token, None)
+        registro = _read_state(caminho_estado)
+        if not registro:
+            return None
+        _delete_state(caminho_estado)
+
+    caminho = registro.get("path")
+    if not caminho:
+        return None
+
+    cleanup = registro.get("cleanup")
+    return {
+        "path": Path(caminho),
+        "name": registro.get("name", "download"),
+        "cleanup": Path(cleanup) if cleanup else None,
+    }
 
 
 def _registrar_log_job(job_id: str, mensagem: str):
     match = PROGRESS_REGEX.search(mensagem)
     with PLANILHA_LOCK:
-        job = PLANILHA_JOBS.get(job_id)
-        if not job:
-            return
-        logs = job.setdefault("logs", [])
-        logs.append(mensagem)
-        if len(logs) > MAX_LOG_ITEMS:
-            job["logs"] = logs[-MAX_LOG_ITEMS:]
-        valor: Optional[int] = None
-        if match:
-            valor = int(match.group(1))
-        elif "Encontrada" in mensagem:
-            valor = job.get("encontradas", 0) + 1
-        if valor is not None:
-            job["encontradas"] = max(job.get("encontradas", 0), valor)
+        def _aplicar(job: Dict[str, object]):
+            logs = list(job.get("logs", []))
+            logs.append(mensagem)
+            if len(logs) > MAX_LOG_ITEMS:
+                logs = logs[-MAX_LOG_ITEMS:]
+            job["logs"] = logs
+            valor: Optional[int] = None
+            if match:
+                valor = int(match.group(1))
+            elif "Encontrada" in mensagem:
+                valor = int(job.get("encontradas", 0)) + 1
+            if valor is not None:
+                job["encontradas"] = max(int(job.get("encontradas", 0)), valor)
+
+        _update_job("planilha", job_id, _aplicar)
 
 
 def _atualizar_job(job_id: str, **campos):
     with PLANILHA_LOCK:
-        job = PLANILHA_JOBS.get(job_id)
-        if not job:
-            return
-        job.update(campos)
+        def _aplicar(job: Dict[str, object]):
+            job.update(campos)
+
+        _update_job("planilha", job_id, _aplicar)
 
 
 def _obter_job(job_id: str) -> Optional[Dict[str, object]]:
     with PLANILHA_LOCK:
-        job = PLANILHA_JOBS.get(job_id)
-        if not job:
-            return None
-        copia = job.copy()
-        if "logs" in copia:
-            copia["logs"] = list(copia["logs"])
-        return copia
+        job = _load_job("planilha", job_id)
+    if not job:
+        return None
+    copia = job.copy()
+    if "logs" in copia:
+        copia["logs"] = list(copia["logs"])
+    return copia
 
 
 def _iniciar_job_planilha(
